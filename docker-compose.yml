@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+  traefik:
+    image: traefik:v2.10
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+
+  frontend:
+    build: 
+      context: ./frontend
+      dockerfile: Dockerfile
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`familyofchaos.local`)"
+      - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+    environment:
+      - REACT_APP_BACKEND_URL=http://backend:4000
+      - REACT_APP_WS_URL=ws://backend:4000
+    depends_on:
+      - backend
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=Host(`api.familyofchaos.local`)"
+      - "traefik.http.services.backend.loadbalancer.server.port=4000"
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017/familyofchaos
+      - REDIS_URI=redis://redis:6379
+      - JWT_SECRET=${JWT_SECRET:-default_secret}
+    depends_on:
+      - mongodb
+      - redis
+
+  auth:
+    build:
+      context: ./services/auth
+      dockerfile: Dockerfile
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.auth.rule=Host(`auth.familyofchaos.local`)"
+      - "traefik.http.services.auth.loadbalancer.server.port=3001"
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017/familyofchaos
+      - WEB3_PROVIDER=${WEB3_PROVIDER:-https://polygon-rpc.com}
+
+  mongodb:
+    image: mongo:6.0
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      - MONGO_INITDB_DATABASE=familyofchaos
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+
+  blockchain:
+    build:
+      context: ./packages/contracts
+      dockerfile: Dockerfile
+    environment:
+      - ETHEREUM_NETWORK=${ETHEREUM_NETWORK:-goerli}
+
+volumes:
+  mongodb_data:
+  redis_data:
+
+networks:
+  default:
+    name: familyofchaos-network
